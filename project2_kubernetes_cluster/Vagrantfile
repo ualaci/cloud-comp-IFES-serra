@@ -1,0 +1,129 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+Vagrant.configure("2") do |config|
+  config.vm.box = "../boxes/jammy-server-cloudimg-amd64-vagrant.box"
+  config.ssh.insert_key = false
+  config.vm.synced_folder "./shared", "/vagrant/shared"
+
+  # --- MANAGER NODE ---
+  config.vm.define "manager" do |manager|
+    manager.vm.hostname = "manager"
+    manager.vm.network "private_network", ip: "192.168.56.10"
+    manager.vm.provider "virtualbox" do |vb|
+      vb.memory = 2048
+      vb.cpus = 2
+    end
+    manager.vm.provision "shell", inline: <<-SHELL
+      export DEBIAN_FRONTEND=noninteractive
+      echo "192.168.56.10 manager" >> /etc/hosts
+      echo "192.168.56.11 worker1" >> /etc/hosts
+      echo "192.168.56.12 worker2" >> /etc/hosts
+
+      # Install Containerd & K8s tools
+      apt-get update
+      apt-get install -y containerd apt-transport-https curl conntrack socat
+      mkdir -p /etc/containerd
+      containerd config default > /etc/containerd/config.toml
+      sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+      systemctl restart containerd
+
+      curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.31/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+      echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.31/deb/ /" > /etc/apt/sources.list.d/kubernetes.list
+      apt-get update && apt-get install -y kubelet kubeadm kubectl
+      apt-mark hold kubelet kubeadm kubectl
+
+      swapoff -a
+      modprobe br_netfilter
+      echo "1" > /proc/sys/net/ipv4/ip_forward
+
+      # Initialize Kubernetes
+      echo "KUBELET_EXTRA_ARGS=--node-ip=192.168.56.10" > /etc/default/kubelet
+      systemctl restart kubelet
+      
+      kubeadm init --apiserver-advertise-address=192.168.56.10 --pod-network-cidr=10.244.0.0/16
+      
+      mkdir -p /home/vagrant/.kube
+      cp -i /etc/kubernetes/admin.conf /home/vagrant/.kube/config
+      chown vagrant:vagrant /home/vagrant/.kube/config
+
+      export KUBECONFIG=/etc/kubernetes/admin.conf
+      kubectl apply -f https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml
+      
+      # Save join command for workers
+      kubeadm token create --print-join-command > /vagrant/shared/join.sh
+    SHELL
+  end
+
+  # --- WORKER 1 ---
+  config.vm.define "worker1" do |worker1|
+    worker1.vm.hostname = "worker1"
+    worker1.vm.network "private_network", ip: "192.168.56.11"
+    worker1.vm.provider "virtualbox" do |vb|
+      vb.memory = 1024
+      vb.cpus = 1
+    end
+    worker1.vm.provision "shell", inline: <<-SHELL
+      export DEBIAN_FRONTEND=noninteractive
+      echo "192.168.56.10 manager" >> /etc/hosts
+      
+      apt-get update
+      apt-get install -y containerd apt-transport-https curl conntrack socat
+      mkdir -p /etc/containerd
+      containerd config default > /etc/containerd/config.toml
+      sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+      systemctl restart containerd
+
+      curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.31/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+      echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.31/deb/ /" > /etc/apt/sources.list.d/kubernetes.list
+      apt-get update && apt-get install -y kubelet kubeadm kubectl
+      apt-mark hold kubelet kubeadm kubectl
+
+      swapoff -a
+      modprobe br_netfilter
+      echo "1" > /proc/sys/net/ipv4/ip_forward
+
+      echo "KUBELET_EXTRA_ARGS=--node-ip=192.168.56.11" > /etc/default/kubelet
+      systemctl restart kubelet
+      
+      # Join cluster
+      bash /vagrant/shared/join.sh
+    SHELL
+  end
+
+  # --- WORKER 2 ---
+  config.vm.define "worker2" do |worker2|
+    worker2.vm.hostname = "worker2"
+    worker2.vm.network "private_network", ip: "192.168.56.12"
+    worker2.vm.provider "virtualbox" do |vb|
+      vb.memory = 1024
+      vb.cpus = 1
+    end
+    worker2.vm.provision "shell", inline: <<-SHELL
+      export DEBIAN_FRONTEND=noninteractive
+      echo "192.168.56.10 manager" >> /etc/hosts
+      
+      apt-get update
+      apt-get install -y containerd apt-transport-https curl conntrack socat
+      mkdir -p /etc/containerd
+      containerd config default > /etc/containerd/config.toml
+      sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+      systemctl restart containerd
+
+      curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.31/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+      echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.31/deb/ /" > /etc/apt/sources.list.d/kubernetes.list
+      apt-get update && apt-get install -y kubelet kubeadm kubectl
+      apt-mark hold kubelet kubeadm kubectl
+
+      swapoff -a
+      modprobe br_netfilter
+      echo "1" > /proc/sys/net/ipv4/ip_forward
+
+      echo "KUBELET_EXTRA_ARGS=--node-ip=192.168.56.12" > /etc/default/kubelet
+      systemctl restart kubelet
+      
+      # Join cluster
+      bash /vagrant/shared/join.sh
+    SHELL
+  end
+end
