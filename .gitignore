@@ -1,0 +1,13 @@
+# Vagrant & VirtualBox
+*.box
+.vagrant/
+*.vdi
+*.vmdk
+*.vhd
+*.vhdx
+*.vbox
+*.vbox-prev
+*.nvram
+
+# Logs
+*.log

@@ -1,1 +1,2 @@
-*.box
+# Este arquivo foi substituído pelo .gitignore correto.
+# Você pode deletar este arquivo (.gitignore.txt).
